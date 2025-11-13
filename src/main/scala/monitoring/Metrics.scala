@@ -68,6 +68,30 @@ object Metrics:
     .help("Number of workers in the pool")
     .register(registry)
 
+  // Gauge for job queue depth
+  val queueDepth: Gauge = Gauge
+    .build()
+    .name("braindrill_queue_depth")
+    .help("Number of jobs waiting in queue")
+    .labelNames("language")
+    .register(registry)
+
+  // Gauge for queued jobs
+  val queuedJobs: Gauge = Gauge
+    .build()
+    .name("braindrill_queued_jobs")
+    .help("Number of jobs in queued state")
+    .labelNames("language")
+    .register(registry)
+
+  // Counter for jobs submitted
+  val jobsSubmitted: Counter = Counter
+    .build()
+    .name("braindrill_jobs_submitted_total")
+    .help("Total number of jobs submitted")
+    .labelNames("language")
+    .register(registry)
+
   def recordRequest(language: String, status: String): Unit =
     requestsTotal.labels(language, status).inc()
 
@@ -91,6 +115,16 @@ object Metrics:
 
   def setWorkerPoolSize(size: Int): Unit =
     workerPoolSize.set(size.toDouble)
+
+  def setQueueDepth(language: String, depth: Int): Unit =
+    queueDepth.labels(language).set(depth.toDouble)
+
+  def incrementQueuedJobs(language: String): Unit =
+    queuedJobs.labels(language).inc()
+    jobsSubmitted.labels(language).inc()
+
+  def decrementQueuedJobs(language: String): Unit =
+    queuedJobs.labels(language).dec()
 
   def getMetrics: String =
     val writer = new StringWriter()

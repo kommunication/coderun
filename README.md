@@ -64,6 +64,103 @@ All code submissions are validated for:
 - **Security patterns**: Dangerous patterns (e.g., `rm -rf`, `wget`, `curl`) are blocked
 - **Empty code**: Non-empty code is required
 
+## Async Job Execution API
+
+**NEW**: The system now supports asynchronous job execution, allowing you to submit code for execution and retrieve results later.
+
+### Submit a Job (Async)
+
+```bash
+curl -X POST http://localhost:8080/jobs \
+  -H "X-API-Key: dev-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "print(\"Hello World\")", "language": "python"}'
+```
+
+**Response**:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "queued"
+}
+```
+
+### Get Job Status
+
+```bash
+curl -X GET http://localhost:8080/jobs/550e8400-e29b-41d4-a716-446655440000 \
+  -H "X-API-Key: dev-key-12345"
+```
+
+**Response**:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "language": "python",
+  "status": "completed",
+  "output": "Hello World\n",
+  "error": null,
+  "created_at": "2025-01-15T10:30:00Z",
+  "started_at": "2025-01-15T10:30:01Z",
+  "completed_at": "2025-01-15T10:30:02Z",
+  "execution_duration_ms": 1234
+}
+```
+
+**Job Statuses**:
+- `queued` - Job is waiting to be executed
+- `running` - Job is currently executing
+- `completed` - Job completed successfully
+- `failed` - Job failed with an error
+- `timedout` - Job exceeded execution time limit
+
+### List All Jobs
+
+```bash
+curl -X GET "http://localhost:8080/jobs?limit=10&offset=0" \
+  -H "X-API-Key: dev-key-12345"
+```
+
+**Response**:
+```json
+{
+  "jobs": [
+    {
+      "job_id": "550e8400-e29b-41d4-a716-446655440000",
+      "language": "python",
+      "status": "completed",
+      "created_at": "2025-01-15T10:30:00Z",
+      "completed_at": "2025-01-15T10:30:02Z",
+      "execution_duration_ms": 1234
+    }
+  ],
+  "pagination": {
+    "total": 1,
+    "limit": 10,
+    "offset": 0
+  }
+}
+```
+
+### Job TTL
+
+Completed jobs are automatically cleaned up after **1 hour** (configurable via `jobs.ttl` in `application.conf`).
+
+## Per-Language Resource Limits
+
+Each programming language has optimized resource limits for execution:
+
+| Language   | CPUs | Memory | Timeout |
+|-----------|------|--------|---------|
+| Java      | 2    | 256 MB | 10s     |
+| Python    | 1    | 50 MB  | 5s      |
+| JavaScript| 1    | 50 MB  | 5s      |
+| Ruby      | 1    | 30 MB  | 5s      |
+| Perl      | 1    | 20 MB  | 3s      |
+| PHP       | 1    | 40 MB  | 5s      |
+
+These limits can be customized in `application.conf` under the `resources` section.
+
 ## Monitoring & Health Checks
 
 The system exposes several monitoring endpoints (no authentication required):
@@ -92,6 +189,9 @@ Exposes Prometheus-compatible metrics including:
 - `braindrill_rate_limit_hits_total` - Rate limit violations
 - `braindrill_validation_errors_total` - Input validation errors
 - `braindrill_worker_pool_size` - Worker pool size
+- `braindrill_queue_depth` - Number of jobs waiting in queue (by language)
+- `braindrill_queued_jobs` - Number of jobs in queued state (by language)
+- `braindrill_jobs_submitted_total` - Total jobs submitted (by language)
 - JVM metrics (memory, GC, threads, etc.)
 
 Example:
@@ -160,6 +260,31 @@ Architecture Diagram:
 - Centralized security configuration in `application.conf`
 - API keys configurable for different environments (dev/prod/test)
 
+## Recent Improvements (Phase 2: Async Execution & Resource Management)
+
+### ✅ Async Job Execution
+- **Job Queue System**: Submit jobs and retrieve results later via REST API
+- **Job Manager Actor**: Centralized job state management with automatic cleanup
+- **Job Lifecycle Tracking**: Queued → Running → Completed/Failed states
+- **Job History**: List and query past executions with pagination
+- **JSON API**: RESTful endpoints for job submission, status retrieval, and listing
+
+### ✅ Advanced Resource Management
+- **Per-Language Resource Profiles**: Optimized CPU, memory, and timeout limits for each language
+- **Configurable Limits**: Java gets 256MB/10s, Python gets 50MB/5s, etc.
+- **Resource Configuration**: Centralized resource management via `ResourceConfig`
+- **Dynamic Resource Allocation**: Workers automatically use language-specific limits
+
+### ✅ Enhanced Metrics
+- **Job Queue Metrics**: Track queued jobs, queue depth, and job submission rates
+- **Queue Depth Gauges**: Monitor per-language queue sizes
+- **Job State Tracking**: Metrics for jobs in each state (queued/running/completed)
+
+### ✅ Configuration
+- Job TTL configuration via `jobs.ttl` in `application.conf`
+- Per-language resource profiles in `ResourceConfig`
+- Backward compatibility with synchronous `/lang/<language>` endpoint
+
 ## Architecture Improvements
 
 The updated architecture now includes:
@@ -168,10 +293,13 @@ The updated architecture now includes:
 3. **Input Validator**: Multi-stage validation (size, language, security patterns)
 4. **Metrics Collection**: Real-time Prometheus metrics export
 5. **Health Endpoints**: Kubernetes-ready health and readiness probes
+6. **Job Manager**: Async job execution with state tracking and TTL-based cleanup
+7. **Resource Manager**: Per-language resource profiles with configurable limits
+8. **Dual Execution Modes**: Both synchronous and asynchronous execution supported
 
 TODO:
 - add support for C, Go, Rust and others - ❌
 - use other `pekko` libraries to make cluster bootstrapping and management flexible and configurable - ❌
-- wrap the cluster in k8s and enable autoscaling - ❌
-- implement async job execution with job queue system - ❌
+- wrap the cluster in k8s and enable autoscaling - 🔄 (foundation in place)
+- implement async job execution with job queue system - ✅ (completed in Phase 2)
 - add multi-file project support and dependency management - ❌

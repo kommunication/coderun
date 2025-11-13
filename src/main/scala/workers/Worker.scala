@@ -1,5 +1,6 @@
 package workers
 
+import config.ResourceConfig
 import org.apache.pekko.actor.typed.receptionist.ServiceKey
 import workers.children.FileHandler.In.PrepareFile
 import org.apache.pekko.actor.typed.{ActorRef, Behavior}
@@ -77,6 +78,7 @@ object Worker:
           languageSpecifics get lang match
             case Some(specifics) =>
               val fileHandler = ctx.spawn(FileHandler(), s"file-handler")
+              val resourceLimits = ResourceConfig.getLimitsForLanguage(lang)
               ctx.log.info(s"{} sending PrepareFile to {}", self, fileHandler)
 
               fileHandler ! FileHandler.In.PrepareFile(
@@ -84,6 +86,7 @@ object Worker:
                   s"$lang${Random.nextInt}${specifics.extension}", // random number for avoiding file overwrite/shadowing
                 compiler = specifics.compiler,
                 dockerImage = specifics.dockerImage,
+                limits = resourceLimits,
                 code = code,
                 replyTo = ctx.self
               )

@@ -1,5 +1,6 @@
 package workers.children
 
+import config.ResourceConfig.ResourceLimits
 import org.apache.pekko.actor.typed.{ActorRef, Terminated}
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import org.apache.pekko.stream.scaladsl.{FileIO, Source}
@@ -20,12 +21,14 @@ object FileHandler:
         code: String,
         compiler: String,
         dockerImage: String,
+        limits: ResourceLimits,
         replyTo: ActorRef[Worker.In]
     )
     case FilePrepared(
         compiler: String,
         file: File,
         dockerImage: String,
+        limits: ResourceLimits,
         replyTo: ActorRef[Worker.In]
     )
     case FilePreparationFailed(why: String, replyTo: ActorRef[Worker.In])
@@ -41,7 +44,7 @@ object FileHandler:
       ctx.log.info(s"{}: processing {}", self, msg)
 
       msg match
-        case In.PrepareFile(name, code, compiler, dockerImage, replyTo) =>
+        case In.PrepareFile(name, code, compiler, dockerImage, limits, replyTo) =>
           val filepath = s"/data/$name"
           val asyncFile = for
             file <- Future(File(filepath))
@@ -52,17 +55,17 @@ object FileHandler:
           yield file
 
           ctx.pipeToSelf(asyncFile):
-            case Success(file) => In.FilePrepared(compiler, file, dockerImage, replyTo)
+            case Success(file) => In.FilePrepared(compiler, file, dockerImage, limits, replyTo)
             case Failure(why)  => In.FilePreparationFailed(why.getMessage, replyTo)
 
           Behaviors.same
 
-        case In.FilePrepared(compiler, file, dockerImage, replyTo) =>
+        case In.FilePrepared(compiler, file, dockerImage, limits, replyTo) =>
           val codeExecutor = ctx.spawn(CodeExecutor(), "code-executor")
           // observe child for self-destruction
           ctx.watch(codeExecutor)
           ctx.log.info("{} prepared file, sending Execute to {}", self, codeExecutor)
-          codeExecutor ! Execute(compiler, file, dockerImage, replyTo)
+          codeExecutor ! Execute(compiler, file, dockerImage, limits, replyTo)
 
           Behaviors.same
 

@@ -3,6 +3,7 @@ package cluster
 import workers.Worker
 import security.{Authentication, InputValidator, RateLimiter}
 import monitoring.Metrics
+import jobs.{Job, JobManager, JobJsonSupport}
 import org.apache.pekko
 import org.apache.pekko.actor.typed.receptionist.Receptionist
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
@@ -80,6 +81,22 @@ object ClusterSystem:
         "rate-limiter"
       )
 
+      // Spawn job manager actor for async job execution
+      val jobTTL = Try(cfg.getDuration("jobs.ttl").toMillis.milliseconds).getOrElse(1.hour)
+      val jobManager = ctx.spawn(
+        JobManager(jobTTL),
+        "job-manager"
+      )
+
+      // Background job processor - polls for queued jobs and assigns them to workers
+      ctx.system.scheduler.scheduleAtFixedRate(
+        initialDelay = 1.second,
+        interval = 100.milliseconds
+      )(() => {
+        // This is a simplified job processor - in production, use a more sophisticated queue
+        // For now, jobs are processed via direct worker assignment when submitted
+      })
+
       val route =
         concat(
           // Health check endpoint (no auth required)
@@ -98,7 +115,94 @@ object ClusterSystem:
             get:
               complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, Metrics.getMetrics))
           ,
-          // Code execution endpoint (requires auth and rate limiting)
+          // Async job submission endpoint
+          path("jobs"):
+            post:
+              Authentication.authenticated: apiKey =>
+                entity(as[String]): requestBody =>
+                  // Parse simple JSON: {"code": "...", "language": "..."}
+                  val codePattern = "\"code\"\\s*:\\s*\"([^\"]+)\"".r
+                  val langPattern = "\"language\"\\s*:\\s*\"([^\"]+)\"".r
+
+                  val code = codePattern.findFirstMatchIn(requestBody).map(_.group(1))
+                  val lang = langPattern.findFirstMatchIn(requestBody).map(_.group(1))
+
+                  (code, lang) match
+                    case (Some(c), Some(l)) =>
+                      // Validate input
+                      InputValidator.validateRequest(c, l) match
+                        case InputValidator.Valid =>
+                          // Check rate limit
+                          val rateLimitCheck = rateLimiter.ask[RateLimiter.Response](
+                            RateLimiter.CheckLimit(apiKey, _)
+                          )
+
+                          onSuccess(rateLimitCheck):
+                            case RateLimiter.Allowed(remaining) =>
+                              // Submit job
+                              val jobRequest = Job.JobRequest(c, l, apiKey)
+                              val submitFuture = jobManager.ask[JobManager.JobSubmitted](
+                                JobManager.SubmitJob(jobRequest, _)
+                              )
+
+                              onSuccess(submitFuture): submitted =>
+                                // Immediately assign job to worker
+                                val loadBalancer = Random.shuffle(loadBalancers).head
+                                jobManager ! JobManager.StartJobExecution(submitted.id, loadBalancer)
+
+                                val responseJson = JobJsonSupport.jobSubmittedToJson(submitted.id, submitted.status)
+                                respondWithHeader(RawHeader("X-RateLimit-Remaining", remaining.toString)):
+                                  complete(HttpEntity(ContentTypes.`application/json`, responseJson))
+
+                            case RateLimiter.RateLimited(retryAfter) =>
+                              respondWithHeaders(
+                                RawHeader("X-RateLimit-Retry-After", retryAfter.toString),
+                                RawHeader("Retry-After", retryAfter.toString)
+                              ):
+                                complete(StatusCodes.TooManyRequests -> s"Rate limit exceeded. Retry after $retryAfter seconds.")
+
+                        case InputValidator.Invalid(reason) =>
+                          complete(StatusCodes.BadRequest -> reason)
+
+                    case _ =>
+                      complete(StatusCodes.BadRequest -> "Invalid request body. Expected JSON with 'code' and 'language' fields.")
+          ,
+          // Get job status by ID
+          pathPrefix("jobs" / Segment): jobIdStr =>
+            get:
+              Authentication.authenticated: _ =>
+                val jobId = Job.JobId(jobIdStr)
+                val jobFuture = jobManager.ask[JobManager.JobResponse](
+                  JobManager.GetJob(jobId, _)
+                )
+
+                onSuccess(jobFuture):
+                  case JobManager.JobFound(job) =>
+                    val responseJson = JobJsonSupport.jobInfoToJson(job)
+                    complete(HttpEntity(ContentTypes.`application/json`, responseJson))
+                  case JobManager.JobNotFound(id) =>
+                    val responseJson = JobJsonSupport.jobNotFoundToJson(id)
+                    complete(StatusCodes.NotFound, HttpEntity(ContentTypes.`application/json`, responseJson))
+          ,
+          // List all jobs (with pagination)
+          path("jobs"):
+            get:
+              Authentication.authenticated: _ =>
+                parameters("limit".as[Int].?(20), "offset".as[Int].?(0)): (limit, offset) =>
+                  val listFuture = jobManager.ask[JobManager.JobListResponse](
+                    JobManager.ListJobs(limit, offset, _)
+                  )
+
+                  onSuccess(listFuture): response =>
+                    val responseJson = JobJsonSupport.jobListToJson(
+                      response.jobs,
+                      response.total,
+                      response.limit,
+                      response.offset
+                    )
+                    complete(HttpEntity(ContentTypes.`application/json`, responseJson))
+          ,
+          // Code execution endpoint (requires auth and rate limiting) - SYNCHRONOUS for backwards compatibility
           pathPrefix("lang" / Segment): lang =>
             post:
               Authentication.authenticated: apiKey =>
@@ -162,5 +266,8 @@ object ClusterSystem:
       ctx.log.info("Server is listening on {}:{}", host, port)
       ctx.log.info("Metrics available at http://{}:{}/metrics", host, port)
       ctx.log.info("Health check at http://{}:{}/health", host, port)
+      ctx.log.info("Async job submission at POST http://{}:{}/jobs", host, port)
+      ctx.log.info("Job status retrieval at GET http://{}:{}/jobs/<job-id>", host, port)
+      ctx.log.info("Synchronous execution at POST http://{}:{}/lang/<language>", host, port)
 
     Behaviors.empty[Nothing]

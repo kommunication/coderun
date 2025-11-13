@@ -1,5 +1,6 @@
 package workers.children
 
+import config.ResourceConfig.ResourceLimits
 import org.apache.pekko.actor.typed.ActorRef
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import org.apache.pekko.stream.IOResult
@@ -25,7 +26,13 @@ object CodeExecutor:
   private val MaxOutputSize = AdjustedMaxSizeInBytes
 
   enum In:
-    case Execute(compiler: String, file: File, dockerImage: String, replyTo: ActorRef[Worker.In])
+    case Execute(
+        compiler: String,
+        file: File,
+        dockerImage: String,
+        limits: ResourceLimits,
+        replyTo: ActorRef[Worker.In]
+    )
     case Executed(output: String, exitCode: Int, replyTo: ActorRef[Worker.In])
     case ExecutionFailed(why: String, replyTo: ActorRef[Worker.In])
     case ExecutionSucceeded(output: String, replyTo: ActorRef[Worker.In])
@@ -43,20 +50,26 @@ object CodeExecutor:
     val self = ctx.self
 
     msg match
-      case In.Execute(compiler, file, dockerImage, replyTo) =>
-        ctx.log.info(s"{}: executing submitted code", self)
+      case In.Execute(compiler, file, dockerImage, limits, replyTo) =>
+        ctx.log.info(
+          s"{}: executing submitted code with limits: cpus={}, memory={}, timeout={}s",
+          self,
+          limits.cpus,
+          limits.memoryString,
+          limits.timeoutSeconds
+        )
         val asyncExecuted: Future[In.Executed] = for
-          // timeout --signal=SIGKILL 2 docker run --rm --ulimit cpu=1 --memory=20m -v engine:/data -w /data rust rust /data/r.rust
+          // timeout --signal=SIGKILL <timeout> docker run --rm --ulimit cpu=<cpus> --memory=<memory> -v engine:/data -w /data <image> <compiler> /data/file
           ps <- run(
             "timeout",
             "--signal=SIGKILL",
-            "2", // 2 second timeout which sends SIGKILL if exceeded
+            limits.timeoutSeconds.toString, // configurable timeout
             "docker",
             "run",
             "--rm", // remove the container when it's done
             "--ulimit", // set limits
-            "cpu=1", // 1 processor
-            "--memory=20m", // 20 M of memory
+            s"cpu=${limits.cpus}", // configurable CPU limit
+            s"--memory=${limits.memoryString}", // configurable memory limit
             "-v", // bind volume
             "engine:/data",
             "-w", // set working directory to /data
