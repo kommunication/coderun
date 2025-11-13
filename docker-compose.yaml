@@ -29,8 +29,6 @@ services:
     stdin_open: true
     ports:
       - '17350:17350'
-    security_opt:
-      - 'seccomp=unconfined'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - engine:/data
@@ -50,8 +48,6 @@ services:
     stdin_open: true
     ports:
       - '17351:17351'
-    security_opt:
-      - 'seccomp=unconfined'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - engine:/data
@@ -71,8 +67,6 @@ services:
     stdin_open: true
     ports:
       - '17352:17352'
-    security_opt:
-      - 'seccomp=unconfined'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - engine:/data

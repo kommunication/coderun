@@ -3,6 +3,7 @@ ThisBuild / scalaVersion := "3.4.1"
 val PekkoVersion = "1.0.2"
 val PekkoHttpVersion = "1.0.1"
 val PekkoManagementVersion = "1.0.0"
+val PrometheusVersion = "0.16.0"
 
 assembly / assemblyMergeStrategy := {
   case PathList("META-INF", "versions", "9", "module-info.class") => MergeStrategy.discard
@@ -25,7 +26,10 @@ libraryDependencies ++= Seq(
   ),
   "org.apache.pekko" %% "pekko-cluster-typed" % PekkoVersion,
   "org.apache.pekko" %% "pekko-serialization-jackson" % PekkoVersion,
-  "ch.qos.logback" % "logback-classic" % "1.5.6"
+  "ch.qos.logback" % "logback-classic" % "1.5.6",
+  "io.prometheus" % "simpleclient" % PrometheusVersion,
+  "io.prometheus" % "simpleclient_hotspot" % PrometheusVersion,
+  "io.prometheus" % "simpleclient_common" % PrometheusVersion
 )
 
 libraryDependencies ++= Seq(
