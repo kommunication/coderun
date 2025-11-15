@@ -1,6 +1,3 @@
-# Ignore JetBrains IDE settings
-.idea/
-
 # Node.js dependencies
 node_modules/
 npm-debug.log*
@@ -35,16 +32,3 @@ yarn-error.log*
 # Optional: Ignore TypeScript build files
 *.tsbuildinfo
 
-../.idea
-.bsp
-.vscode
-.bloop
-.history
-.metals
-metals.sbt
-/project/*.conf
-.DS_Store
-target/
-project/target/
-
-logs/

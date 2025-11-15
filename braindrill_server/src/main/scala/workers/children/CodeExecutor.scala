@@ -50,13 +50,13 @@ object CodeExecutor:
           ps <- run(
             "timeout",
             "--signal=SIGKILL",
-            "2", // 2 second timeout which sends SIGKILL if exceeded
+            "3", // 2 second timeout which sends SIGKILL if exceeded
             "docker",
             "run",
             "--rm", // remove the container when it's done
             "--ulimit", // set limits
-            "cpu=1", // 1 processor
-            "--memory=20m", // 20 M of memory
+            "cpu=2", // 2 processors
+            "--memory=50m", // 50 M of memory
             "-v", // bind volume
             "engine:/data",
             "-w", // set working directory to /data
@@ -65,9 +65,8 @@ object CodeExecutor:
             compiler,
             s"${file.getPath}"
           )
-          (successSource, errorSource) = src(ps.getInputStream) -> src(
-            ps.getErrorStream
-          ) // error and success channels as streams
+          // error and success channels as streams
+          (successSource, errorSource) = src(ps.getInputStream) -> src(ps.getErrorStream)
           ((success, error), exitCode) <- successSource
             .runWith(readOutput) // join success, error and exitCode
             .zip(errorSource.runWith(readOutput))

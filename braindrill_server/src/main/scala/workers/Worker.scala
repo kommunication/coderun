@@ -19,7 +19,7 @@ object Worker:
       dockerImage: String
   )
 
-  private val languageSpecifics: Map[String, LanguageSpecifics] =
+  private val LangSpecifics: Map[String, LanguageSpecifics] =
     Map(
       "java" -> LanguageSpecifics(
         compiler = "java",
@@ -74,7 +74,7 @@ object Worker:
       Behaviors.receiveMessage[In]:
         case msg @ StartExecution(code, lang, replyTo) =>
           ctx.log.info(s"{} processing StartExecution", self)
-          languageSpecifics get lang match
+          LangSpecifics get lang match
             case Some(specifics) =>
               val fileHandler = ctx.spawn(FileHandler(), s"file-handler")
               ctx.log.info(s"{} sending PrepareFile to {}", self, fileHandler)
